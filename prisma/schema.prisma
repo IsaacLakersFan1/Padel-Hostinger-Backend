@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  Players   Player[]
+  Matches   Match[]
+}
+
+model Player {
+  id        Int      @id @default(autoincrement())
+  name      String
+  status    String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  player1   Match[]   @relation("player1")
+  player2   Match[]   @relation("player2")
+  player3   Match[]   @relation("player3")
+  player4   Match[]   @relation("player4")
+}
+
+model Match {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  player1   Player?   @relation("player1", fields: [player1Id], references: [id])
+  player1Id Int?      @default(0)
+  player2   Player?   @relation("player2", fields: [player2Id], references: [id])
+  player2Id Int?      @default(0) 
+  player3   Player?   @relation("player3", fields: [player3Id], references: [id])
+  player3Id Int?      @default(0)
+  player4   Player?   @relation("player4", fields: [player4Id], references: [id])
+  player4Id Int?      @default(0)
+  winnerTeam Int
+  run        Int
+  date       DateTime
+  season     Int
+  gameMode   GameMode @relation(fields: [gameModeId], references: [id])
+  gameModeId Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GameMode {
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  matches   Match[]
+}
