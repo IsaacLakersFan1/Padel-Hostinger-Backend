@@ -10,12 +10,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({
-  origin: "*", 
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Authorization", "Content-Type"],
-  exposedHeaders: ["Content-Disposition"] 
-}));
+app.use(cors());
 
 app.use(express.json());
 
