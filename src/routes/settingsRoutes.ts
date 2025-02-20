@@ -4,6 +4,6 @@ import { downloadDB } from "../controllers/settingsController";
 
 const router = express.Router();
 
-router.get("/download-db", authenticateJWT, downloadDB);
+router.get("/download-db", downloadDB);
 
 export default router;
