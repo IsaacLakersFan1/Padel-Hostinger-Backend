@@ -26,6 +26,7 @@ const downloadDB = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     res.setHeader("Content-Disposition", 'attachment; filename="database.db"');
     res.setHeader("Content-Type", "application/x-sqlite3");
     res.setHeader("Content-Length", fs_1.default.statSync(DB_PATH).size.toString());
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'self' http://gkks0gc4c4g4gc4soo0osg08.193.46.198.43.sslip.io");
     const fileStream = fs_1.default.createReadStream(DB_PATH);
     fileStream.pipe(res);
 });
