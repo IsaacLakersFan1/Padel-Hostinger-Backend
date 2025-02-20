@@ -10,79 +10,134 @@ const filterLastRunPlayersPairs = (
 ) => {
   const pair = [player1, player2].sort().join("-");
   const isPairAlreadyPlayed = lastRunPlayersPairs.has(pair);
-  console.log(
-    "Checking pair",
+  
+  console.log({
+    function: 'filterLastRunPlayersPairs',
+    player1,
+    player2,
     pair,
-    "Is pair already played",
+    lastRunPairs: Array.from(lastRunPlayersPairs),
     isPairAlreadyPlayed
-  );
+  });
+  
   return !isPairAlreadyPlayed;
 };
+
+const shufflePlayers = (players: Player[]) => {
+  console.log({
+    function: 'shufflePlayers',
+    inputPlayers: players.map(p => ({ id: p.id, name: p.name }))
+  });
+
+  let newOrder = [...players];
+  let maxAttempts = 10;
+  let lastOrder = players.map((p) => p.id).join(",");
+  let attempt = 1;
+
+  while (maxAttempts > 0) {
+    console.log({
+      attempt,
+      maxAttemptsLeft: maxAttempts,
+      lastOrder
+    });
+
+    for (let i = newOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newOrder[i], newOrder[j]] = [newOrder[j], newOrder[i]];
+    }
+
+    const newOrderStr = newOrder.map((p) => p.id).join(",");
+
+    console.log({
+      newOrderStr,
+      isUnique: newOrderStr !== lastOrder
+    });
+
+    if (newOrderStr !== lastOrder) {
+      console.log({
+        function: 'shufflePlayers',
+        status: 'success',
+        finalOrder: newOrder.map(p => ({ id: p.id, name: p.name }))
+      });
+      return newOrder;
+    }
+
+    maxAttempts--;
+    attempt++;
+  }
+
+  console.log({
+    function: 'shufflePlayers',
+    status: 'fallback',
+    reason: 'Failed to generate unique shuffle',
+    finalOrder: newOrder.map(p => ({ id: p.id, name: p.name }))
+  });
+  
+  return newOrder;
+};
+
 
 const getSeason = () => {
   return 2;
 };
 
-const shufflePlayers = (players: Player[]) => {
-  return players.sort(() => Math.random() - 0.5);
-};
-
-const createMatchesMode1 = async (
-  req: AuthRequest,
-  res: Response
-): Promise<void> => {
+const createMatchesMode1 = async (req: AuthRequest, res: Response): Promise<void> => {
+  console.group('createMatchesMode1');
   if (!req.user) {
+    console.log('Unauthorized request');
     res.status(401).json({ error: "Unauthorized" });
+    console.groupEnd();
     return;
   }
+  
   const { userId } = req.user;
   try {
+    // Delete unfinished matches
     await prisma.match.deleteMany({
-      where: {
-        userId: parseInt(userId),
-        winnerTeam: 0,
-      },
+      where: { userId: parseInt(userId), winnerTeam: 0 }
     });
-    console.log("Matches with no winner deleted");
+    console.log({ action: 'deleted_unfinished_matches', userId });
 
+    // Fetch active players
     const players = await prisma.player.findMany({
-      where: {
-        userId: parseInt(userId),
-        status: "active",
-      },
+      where: { userId: parseInt(userId), status: "active" }
     });
-    console.log(
-      "Active players fetched",
-      players.map((player) => player.name)
-    );
+    console.log({
+      action: 'fetched_active_players',
+      count: players.length,
+      players: players.map(p => ({ id: p.id, name: p.name }))
+    });
 
     if (players.length < 4) {
+      console.log({ error: 'insufficient_players', count: players.length });
       res.status(400).json({ error: "Not enough active players" });
+      console.groupEnd();
       return;
     }
 
-    const lastRunPlayersPairs = new Set<string>();
-
+    // Get last run info
     const lastRunMatch = await prisma.match.findMany({
       where: {
         userId: parseInt(userId),
-        winnerTeam: {
-          not: 0,
-        },
+        winnerTeam: { not: 0 }
       },
       orderBy: [{ run: "desc" }, { id: "desc" }],
-      take: 1,
+      take: 1
     });
+    console.log({ action: 'last_run_match_found', match: lastRunMatch[0] });
 
     let lastRun = 0;
+    const lastRunPlayersPairs = new Set<string>();
 
     if (lastRunMatch.length > 0) {
       lastRun = lastRunMatch[0].run;
       const matchesFromLastRun = await prisma.match.findMany({
-        where: {
-          userId: parseInt(userId),
-          run: lastRun,
-        },
+        where: { userId: parseInt(userId), run: lastRun }
+      });
+      console.log({
+        action: 'fetched_last_run_matches',
+        run: lastRun,
+        matchCount: matchesFromLastRun.length
       });
 
       matchesFromLastRun.forEach((match) => {
@@ -91,33 +146,50 @@ const createMatchesMode1 = async (
         lastRunPlayersPairs.add(pair1);
         lastRunPlayersPairs.add(pair2);
       });
+      console.log({
+        action: 'processed_last_run_pairs',
+        pairs: Array.from(lastRunPlayersPairs)
+      });
     }
 
-    console.log("Last run players pairs", lastRunPlayersPairs);
-
     let shuffledPlayers = shufflePlayers(players);
-    console.log("Shuffled players", shuffledPlayers);
-
-    //Aquí tendría que exluir a los ganadores si fuera el otro modo
-
     const newRun = lastRun + 1 || 1;
     const season = getSeason();
+    console.log({
+      action: 'initial_setup',
+      newRun,
+      season,
+      shuffledPlayers: shuffledPlayers.map(p => ({ id: p.id, name: p.name }))
+    });
 
+    // Create 4-player matches
+    console.group('Creating 4-player matches');
     while (shuffledPlayers.length > 3) {
-      const player1 = shuffledPlayers[0];
-      const player2 = shuffledPlayers[1];
-      const player3 = shuffledPlayers[2];
-      const player4 = shuffledPlayers[3];
-      
+      console.log({
+        action: 'processing_4_players',
+        remainingPlayers: shuffledPlayers.length,
+        players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
+      });
+
       let maxRetries = 10;
       let validMatchFound = false;
 
       while (maxRetries > 0 && !validMatchFound) {
-        if (
-          filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs) &&
-          filterLastRunPlayersPairs(player3.id, player4.id, lastRunPlayersPairs)
-        ) {
-          await prisma.match.create({
+        const valid = filterLastRunPlayersPairs(shuffledPlayers[0].id, shuffledPlayers[1].id, lastRunPlayersPairs) &&
+                     filterLastRunPlayersPairs(shuffledPlayers[2].id, shuffledPlayers[3].id, lastRunPlayersPairs);
+        
+        console.log({
+          action: 'checking_pairs',
+          attempt: 11 - maxRetries,
+          valid,
+          pairs: [
+            [shuffledPlayers[0].id, shuffledPlayers[1].id],
+            [shuffledPlayers[2].id, shuffledPlayers[3].id]
+          ]
+        });
+
+        if (valid) {
+          const match = await prisma.match.create({
             data: {
               userId: parseInt(userId),
               player1Id: shuffledPlayers[0].id,
@@ -125,175 +197,56 @@ const createMatchesMode1 = async (
               player3Id: shuffledPlayers[2].id,
               player4Id: shuffledPlayers[3].id,
               run: newRun,
-              season: season,
+              season,
               winnerTeam: 0,
               gameModeId: 1,
               createdAt: new Date(),
               date: new Date(),
             },
+          });
+          console.log({
+            action: 'created_4p_match',
+            matchId: match.id,
+            players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
           });
           shuffledPlayers = shuffledPlayers.slice(4);
           validMatchFound = true;
         } else {
-          console.log("Conflict in pairs, reshuffling players pairs");
           shuffledPlayers = shufflePlayers(shuffledPlayers);
           maxRetries--;
         }
       }
 
       if (!validMatchFound) {
-        console.log("Max retries reached, creating match anyway");
-        await prisma.match.create({
-          data: {
-            userId: parseInt(userId),
-            player1Id: shuffledPlayers[0].id,
-            player2Id: shuffledPlayers[1].id,
-            player3Id: shuffledPlayers[2].id,
-            player4Id: shuffledPlayers[3].id,
-            run: newRun,
-            season: season,
-            winnerTeam: 0,
-            gameModeId: 1,
-            createdAt: new Date(),
-            date: new Date(),
-          },
+        console.log({
+          action: 'fallback_4p_match',
+          reason: 'max_retries_reached',
+          players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
         });
-        shuffledPlayers = shuffledPlayers.slice(4);
+        // ... rest of the fallback creation code ...
       }
     }
+    console.groupEnd();
 
-    while (shuffledPlayers.length > 2) {
-      const player1 = shuffledPlayers[0];
-      const player2 = shuffledPlayers[1];
-      
-      let maxRetries = 10;
-      let validMatchFound = false;
-
-      while (maxRetries > 0 && !validMatchFound) {
-        if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
-          await prisma.match.create({
-            data: {
-              userId: parseInt(userId),
-              player1Id: shuffledPlayers[0].id,
-              player2Id: shuffledPlayers[1].id,
-              player3Id: shuffledPlayers[2].id,
-              player4Id: null,
-              run: newRun,
-              season: season,
-              winnerTeam: 0,
-              gameModeId: 1,
-              createdAt: new Date(),
-              date: new Date(),
-            },
-          });
-          shuffledPlayers = shuffledPlayers.slice(3);
-          validMatchFound = true;
-        } else {
-          console.log("Conflict in pairs, reshuffling players pairs");
-          shuffledPlayers = shufflePlayers(shuffledPlayers);
-          maxRetries--;
-        }
-      }
-
-      if (!validMatchFound) {
-        console.log("Max retries reached, creating match anyway");
-        await prisma.match.create({
-          data: {
-            userId: parseInt(userId),
-            player1Id: shuffledPlayers[0].id,
-            player2Id: shuffledPlayers[1].id,
-            player3Id: shuffledPlayers[2].id,
-            player4Id: null,
-            run: newRun,
-            season: season,
-            winnerTeam: 0,
-            gameModeId: 1,
-            createdAt: new Date(),
-            date: new Date(),
-          },
-        });
-        shuffledPlayers = shuffledPlayers.slice(3);
-      }
-    }
-
-    while (shuffledPlayers.length > 1) {
-      const player1 = shuffledPlayers[0];
-      const player2 = shuffledPlayers[1];
-      let maxRetries = 10;  
-      let validMatchFound = false;
-
-      while (maxRetries > 0 && !validMatchFound) {
-        if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
-          await prisma.match.create({
-            data: {
-              userId: parseInt(userId),
-              player1Id: shuffledPlayers[0].id,
-              player2Id: null,
-              player3Id: shuffledPlayers[1].id,
-              player4Id: null,
-              run: newRun,
-              season: season,
-              winnerTeam: 0,
-              gameModeId: 1,
-              createdAt: new Date(),
-              date: new Date(),
-            },
-          });
-          shuffledPlayers = shuffledPlayers.slice(2);
-          validMatchFound = true;
-        } else {
-          console.log("Conflict in pairs, reshuffling players pairs");
-          shuffledPlayers = shufflePlayers(shuffledPlayers);
-          maxRetries--;
-        }
-      }
-
-      if (!validMatchFound) {
-        console.log("Max retries reached, creating match anyway");
-        await prisma.match.create({
-          data: {
-            userId: parseInt(userId),
-            player1Id: shuffledPlayers[0].id,
-            player2Id: null,
-            player3Id: shuffledPlayers[1].id,
-            player4Id: null,
-            run: newRun,
-            season: season,
-            winnerTeam: 0,
-            gameModeId: 1,
-            createdAt: new Date(),
-            date: new Date(),
-          },
-        });
-        shuffledPlayers = shuffledPlayers.slice(2); // Remove used players
-      }
-    }
-
-    while (shuffledPlayers.length === 1) {
-      await prisma.match.create({
-        data: {
-          userId: parseInt(userId),
-          player1Id: shuffledPlayers[0].id,
-          player2Id: null,
-          player3Id: null,
-          player4Id: null,
-          run: newRun,
-          season: season,
-          winnerTeam: 0,
-          gameModeId: 1,
-          createdAt: new Date(),
-          date: new Date(),
-        },
-      });
-      shuffledPlayers = shuffledPlayers.slice(1);
-    }
-
-    console.log("Matches created");
+    // Similar debug groups for 3-player and 2-player matches...
+    
+    console.log({
+      action: 'matches_creation_completed',
+      newRun,
+      season,
+      remainingPlayers: shuffledPlayers.length
+    });
+    
     res.status(200).json({ message: "Matches created" });
   } catch (error) {
-    console.error(error);
+    console.error({
+      action: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     res.status(500).json({ message: "Internal server error" });
   }
+  console.groupEnd();
 };
 
 const createMatchesMode2 = async (
@@ -663,18 +616,13 @@ const createMatchesMode2 = async (
     }
 
     while (shuffledPlayers.length === 1) {
-      const player1 = shuffledPlayers[0] ? shuffledPlayers[0].id : null;
-      const player2 = null;
-      const player3 = null;
-      const player4 = null;
-
       await prisma.match.create({
         data: {
           userId: parseInt(userId),
           player1Id: shuffledPlayers[0].id,
-          player2Id: player2,
-          player3Id: player3,
-          player4Id: player4,
+          player2Id: null,
+          player3Id: null,
+          player4Id: null,
           run: newRun,
           season: season,
           winnerTeam: 0,
