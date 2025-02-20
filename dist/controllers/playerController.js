@@ -24,8 +24,8 @@ const getAllPlayers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         const players = yield prismaClient_1.default.player.findMany({
             where: {
-                userId: userId ? parseInt(userId) : undefined
-            }
+                userId: userId ? parseInt(userId) : undefined,
+            },
         });
         res.status(200).json(players);
     }
@@ -43,8 +43,8 @@ const getPlayerById = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const playerId = req.params.id;
         const player = yield prismaClient_1.default.player.findUnique({
             where: {
-                id: parseInt(playerId)
-            }
+                id: parseInt(playerId),
+            },
         });
         if (!player) {
             res.status(404).json({ error: "Player not found" });
@@ -68,10 +68,10 @@ const createPlayer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const player = yield prismaClient_1.default.player.create({
             data: {
                 name,
-                status: 'active',
-                imageUrl: name.toLowerCase().replace(/\s+/g, '-'),
-                userId: parseInt(userId)
-            }
+                status: "active",
+                imageUrl: name.toLowerCase().replace(/\s+/g, "-"),
+                userId: parseInt(userId),
+            },
         });
         res.status(201).json(player);
     }
@@ -92,8 +92,8 @@ const getActivePlayers = (req, res) => __awaiter(void 0, void 0, void 0, functio
         const activePlayers = yield prismaClient_1.default.player.findMany({
             where: {
                 userId: parseInt(userId),
-                status: "active"
-            }
+                status: "active",
+            },
         });
         res.status(200).json(activePlayers);
     }
@@ -114,9 +114,9 @@ const updateStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const player = yield prismaClient_1.default.player.update({
             where: {
                 id: parseInt(playerId),
-                userId: parseInt(userId)
+                userId: parseInt(userId),
             },
-            data: { status }
+            data: { status },
         });
         res.status(200).json(player);
     }
@@ -127,22 +127,20 @@ const updateStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.updateStatus = updateStatus;
 const getPossibleTeammates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { matchId } = req.params;
-    console.log(matchId);
     try {
         if (!req.user) {
             res.status(401).json({ error: "Unauthorized" });
             return;
         }
         const userId = parseInt(req.user.userId);
-        console.log(userId);
         const match = yield prismaClient_1.default.match.findUnique({
             where: { id: parseInt(matchId), userId: userId },
             select: {
                 player1Id: true,
                 player2Id: true,
                 player3Id: true,
-                player4Id: true
-            }
+                player4Id: true,
+            },
         });
         if (!match) {
             res.status(404).json({ error: "Match not found" });
@@ -150,16 +148,17 @@ const getPossibleTeammates = (req, res) => __awaiter(void 0, void 0, void 0, fun
         }
         const activePlayers = yield prismaClient_1.default.player.findMany({
             where: {
-                status: "active"
-            }
+                status: "active",
+                userId: userId,
+            },
         });
         const assignedPlayerIds = new Set([
             match.player1Id,
             match.player2Id,
             match.player3Id,
-            match.player4Id
-        ].filter(id => id !== null));
-        const possibleTeammates = activePlayers.filter(player => !assignedPlayerIds.has(player.id));
+            match.player4Id,
+        ].filter((id) => id !== null));
+        const possibleTeammates = activePlayers.filter((player) => !assignedPlayerIds.has(player.id));
         res.status(200).json(possibleTeammates);
     }
     catch (error) {
@@ -179,11 +178,11 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 userId: parseInt(req.user.userId),
             },
             orderBy: {
-                season: 'desc'
+                season: "desc",
             },
             select: {
-                season: true
-            }
+                season: true,
+            },
         });
         if (!lastMatch) {
             res.status(404).json({ error: "No matches found" });
@@ -198,8 +197,8 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 name: true,
                 status: true,
                 userId: true,
-                imageUrl: true
-            }
+                imageUrl: true,
+            },
         });
         const playersStats = yield Promise.all(players.map((player) => __awaiter(void 0, void 0, void 0, function* () {
             const matches = yield prismaClient_1.default.match.findMany({
@@ -210,11 +209,11 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         { player1Id: player.id },
                         { player2Id: player.id },
                         { player3Id: player.id },
-                        { player4Id: player.id }
+                        { player4Id: player.id },
                     ],
                     winnerTeam: {
-                        not: 0
-                    }
+                        not: 0,
+                    },
                 },
                 select: {
                     id: true,
@@ -222,11 +221,11 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     player1Id: true,
                     player2Id: true,
                     player3Id: true,
-                    player4Id: true
+                    player4Id: true,
                 },
                 orderBy: {
-                    createdAt: 'asc'
-                }
+                    createdAt: "asc",
+                },
             });
             let wins = 0;
             let losses = 0;
@@ -234,11 +233,13 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             matches.forEach((match, index) => {
                 const isTeam1 = match.player1Id === player.id || match.player2Id === player.id;
                 const isTeam2 = match.player3Id === player.id || match.player4Id === player.id;
-                if ((isTeam1 && match.winnerTeam === 1) || (isTeam2 && match.winnerTeam === 2)) {
+                if ((isTeam1 && match.winnerTeam === 1) ||
+                    (isTeam2 && match.winnerTeam === 2)) {
                     wins++;
                     eloHistory.push((eloHistory[index - 1] || 0) + 1);
                 }
-                else if ((isTeam1 && match.winnerTeam === 2) || (isTeam2 && match.winnerTeam === 1)) {
+                else if ((isTeam1 && match.winnerTeam === 2) ||
+                    (isTeam2 && match.winnerTeam === 1)) {
                     losses++;
                     eloHistory.push((eloHistory[index - 1] || 0) - 1);
                 }
@@ -252,17 +253,17 @@ const getRankings = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     name: player.name,
                     status: player.status,
                     user_id: player.userId,
-                    imageUrl: player.imageUrl
+                    imageUrl: player.imageUrl,
                 },
                 totalMatches: matches.length,
                 wins,
                 losses,
-                eloHistory
+                eloHistory,
             };
         })));
         res.status(200).json({
             players: playersStats,
-            season: lastMatch.season
+            season: lastMatch.season,
         });
     }
     catch (error) {
@@ -285,7 +286,13 @@ const getPlayerStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
         // Fetch player info
         const player = yield prismaClient_1.default.player.findUnique({
             where: { id: playerId },
-            select: { id: true, name: true, status: true, userId: true, imageUrl: true }
+            select: {
+                id: true,
+                name: true,
+                status: true,
+                userId: true,
+                imageUrl: true,
+            },
         });
         if (!player) {
             res.status(404).json({ error: "Player not found" });
@@ -297,9 +304,9 @@ const getPlayerStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
                     { player1Id: playerId },
                     { player2Id: playerId },
                     { player3Id: playerId },
-                    { player4Id: playerId }
+                    { player4Id: playerId },
                 ] }, (season ? { season: season } : {})), { winnerTeam: {
-                    not: 0
+                    not: 0,
                 } }),
             select: {
                 id: true,
@@ -307,8 +314,8 @@ const getPlayerStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 player1Id: true,
                 player2Id: true,
                 player3Id: true,
-                player4Id: true
-            }
+                player4Id: true,
+            },
         });
         let wins = 0;
         let losses = 0;
@@ -316,11 +323,13 @@ const getPlayerStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
         matches.forEach((match, index) => {
             const isTeam1 = match.player1Id === playerId || match.player2Id === playerId;
             const isTeam2 = match.player3Id === playerId || match.player4Id === playerId;
-            if ((isTeam1 && match.winnerTeam === 1) || (isTeam2 && match.winnerTeam === 2)) {
+            if ((isTeam1 && match.winnerTeam === 1) ||
+                (isTeam2 && match.winnerTeam === 2)) {
                 wins++;
                 eloHistory.push((eloHistory[index - 1] || 0) + 1); // Win = +1
             }
-            else if ((isTeam1 && match.winnerTeam === 2) || (isTeam2 && match.winnerTeam === 1)) {
+            else if ((isTeam1 && match.winnerTeam === 2) ||
+                (isTeam2 && match.winnerTeam === 1)) {
                 losses++;
                 eloHistory.push((eloHistory[index - 1] || 0) - 1); // Loss = -1
             }
@@ -334,12 +343,12 @@ const getPlayerStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 name: player.name,
                 status: player.status,
                 user_id: player.userId,
-                imageUrl: player.imageUrl
+                imageUrl: player.imageUrl,
             },
             totalMatches: matches.length,
             wins,
             losses,
-            eloHistory
+            eloHistory,
         });
     }
     catch (error) {

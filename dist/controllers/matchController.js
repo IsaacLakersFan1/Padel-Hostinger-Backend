@@ -17,254 +17,351 @@ const prismaClient_1 = __importDefault(require("../utils/prismaClient"));
 const filterLastRunPlayersPairs = (player1, player2, lastRunPlayersPairs) => {
     const pair = [player1, player2].sort().join("-");
     const isPairAlreadyPlayed = lastRunPlayersPairs.has(pair);
-    console.log("Checking pair", pair, "Is pair already played", isPairAlreadyPlayed);
+    console.log({
+        function: 'filterLastRunPlayersPairs',
+        player1,
+        player2,
+        pair,
+        lastRunPairs: Array.from(lastRunPlayersPairs),
+        isPairAlreadyPlayed
+    });
     return !isPairAlreadyPlayed;
+};
+const createValidTeams = (players, teams, gameModeId) => {
+    console.group('Generating Valid Matches');
+    // if (gameModeId !== 1) {
+    //   // console.log("Game mode not supported.");
+    //   // console.groupEnd();
+    //   return [];
+    // }
+    let attempts = 0;
+    let maxAttempts = 100; // To prevent infinite loops
+    let validTeam = [];
+    while (attempts < maxAttempts) {
+        console.log(`Attempt #${attempts + 1}`);
+        const shuffledPlayers = shufflePlayers(players);
+        const teamIds = [];
+        let isValid = true;
+        let remainingPlayer = null;
+        for (let i = 0; i < shuffledPlayers.length - 1; i += 2) {
+            const player1 = shuffledPlayers[i];
+            const player2 = shuffledPlayers[i + 1];
+            const pairId = [player1.id, player2.id].sort().join('-');
+            console.log({
+                checking: 'pair',
+                player1: player1.name,
+                player2: player2.name,
+                pairString: pairId,
+                existsInTeams: teams.has(pairId)
+            });
+            if (teams.has(pairId)) {
+                console.log('Invalid: Pair already exists in teams');
+                isValid = false;
+                break;
+            }
+            teamIds.push(player1.id, player2.id); // Push as integers, maintaining order
+        }
+        // If there's an odd player left, store their ID
+        if (shuffledPlayers.length % 2 === 1) {
+            remainingPlayer = shuffledPlayers[shuffledPlayers.length - 1].id;
+        }
+        if (isValid) {
+            console.log({
+                status: 'valid',
+                generatedTeams: teamIds,
+                remainingPlayer: remainingPlayer !== null && remainingPlayer !== void 0 ? remainingPlayer : 'none'
+            });
+            validTeam = remainingPlayer !== null ? [...teamIds, remainingPlayer] : teamIds;
+            break; // Exit loop when a valid set of pairs is found
+        }
+        attempts++;
+    }
+    console.groupEnd();
+    if (validTeam.length === 0) {
+        console.warn('Could not generate valid teams after multiple attempts.');
+    }
+    return validTeam;
+};
+const shufflePlayers = (players) => {
+    let newOrder = [...players];
+    let maxAttempts = 10;
+    let lastOrder = players.map((p) => p.id).join(",");
+    let attempt = 1;
+    while (maxAttempts > 0) {
+        // console.log({
+        //   attempt,
+        //   maxAttemptsLeft: maxAttempts,
+        //   lastOrder
+        // });
+        for (let i = newOrder.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [newOrder[i], newOrder[j]] = [newOrder[j], newOrder[i]];
+        }
+        const newOrderStr = newOrder.map((p) => p.id).join(",");
+        // console.log({
+        //   newOrderStr,
+        //   isUnique: newOrderStr !== lastOrder
+        // });
+        if (newOrderStr !== lastOrder) {
+            // console.log({
+            //   function: 'shufflePlayers',
+            //   status: 'success',
+            //   finalOrder: newOrder.map(p => ({ id: p.id, name: p.name }))
+            // });
+            return newOrder;
+        }
+        maxAttempts--;
+        attempt++;
+    }
+    // console.log({
+    //   function: 'shufflePlayers',
+    //   status: 'fallback',
+    //   reason: 'Failed to generate unique shuffle',
+    //   finalOrder: newOrder.map(p => ({ id: p.id, name: p.name }))
+    // });
+    return newOrder;
 };
 const getSeason = () => {
     return 2;
 };
-const shufflePlayers = (players) => {
-    return players.sort(() => Math.random() - 0.5);
-};
 const createMatchesMode1 = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    console.group('createMatchesMode1');
     if (!req.user) {
+        // console.log('Unauthorized request');
         res.status(401).json({ error: "Unauthorized" });
+        console.groupEnd();
         return;
     }
     const { userId } = req.user;
     try {
+        // Delete unfinished matches
         yield prismaClient_1.default.match.deleteMany({
-            where: {
-                userId: parseInt(userId),
-                winnerTeam: 0,
-            },
+            where: { userId: parseInt(userId), winnerTeam: 0 }
         });
-        console.log("Matches with no winner deleted");
+        // console.log({ action: 'deleted_unfinished_matches', userId });
+        // Fetch active players
         const players = yield prismaClient_1.default.player.findMany({
-            where: {
-                userId: parseInt(userId),
-                status: "active",
-            },
+            where: { userId: parseInt(userId), status: "active" }
         });
-        console.log("Active players fetched", players.map((player) => player.name));
+        // console.log({
+        //   action: 'fetched_active_players',
+        //   count: players.length,
+        //   players: players.map(p => ({ id: p.id, name: p.name }))
+        // });
         if (players.length < 4) {
+            // console.log({ error: 'insufficient_players', count: players.length });
             res.status(400).json({ error: "Not enough active players" });
+            // console.groupEnd();
             return;
         }
-        const lastRunPlayersPairs = new Set();
+        // Get last run info
         const lastRunMatch = yield prismaClient_1.default.match.findMany({
             where: {
                 userId: parseInt(userId),
-                winnerTeam: {
-                    not: 0,
-                },
+                winnerTeam: { not: 0 }
             },
             orderBy: [{ run: "desc" }, { id: "desc" }],
-            take: 1,
+            take: 1
         });
+        // console.log({ action: 'last_run_match_found', match: lastRunMatch[0] });
         let lastRun = 0;
+        const lastRunPlayersPairs = new Set();
         if (lastRunMatch.length > 0) {
             lastRun = lastRunMatch[0].run;
             const matchesFromLastRun = yield prismaClient_1.default.match.findMany({
-                where: {
-                    userId: parseInt(userId),
-                    run: lastRun,
-                },
+                where: { userId: parseInt(userId), run: lastRun }
             });
+            // console.log({
+            //   action: 'fetched_last_run_matches',
+            //   run: lastRun,
+            //   matchCount: matchesFromLastRun.length
+            // });
             matchesFromLastRun.forEach((match) => {
                 const pair1 = [match.player1Id, match.player2Id].sort().join("-");
                 const pair2 = [match.player3Id, match.player4Id].sort().join("-");
                 lastRunPlayersPairs.add(pair1);
                 lastRunPlayersPairs.add(pair2);
             });
+            // console.log({
+            //   action: 'processed_last_run_pairs',
+            //   pairs: Array.from(lastRunPlayersPairs)
+            // });
         }
-        console.log("Last run players pairs", lastRunPlayersPairs);
-        let shuffledPlayers = shufflePlayers(players);
-        console.log("Shuffled players", shuffledPlayers);
-        //Aquí tendría que exluir a los ganadores si fuera el otro modo
+        // let shuffledPlayers = shufflePlayers(players);
+        let validTeam = createValidTeams(players, lastRunPlayersPairs, 1);
         const newRun = lastRun + 1 || 1;
         const season = getSeason();
-        while (shuffledPlayers.length > 3) {
-            const player1 = shuffledPlayers[0];
-            const player2 = shuffledPlayers[1];
-            const player3 = shuffledPlayers[2];
-            const player4 = shuffledPlayers[3];
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs) &&
-                    filterLastRunPlayersPairs(player3.id, player4.id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: shuffledPlayers[0].id,
-                            player2Id: shuffledPlayers[1].id,
-                            player3Id: shuffledPlayers[2].id,
-                            player4Id: shuffledPlayers[3].id,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 1,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    shuffledPlayers = shuffledPlayers.slice(4);
-                    validMatchFound = true;
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: shuffledPlayers[0].id,
-                        player2Id: shuffledPlayers[1].id,
-                        player3Id: shuffledPlayers[2].id,
-                        player4Id: shuffledPlayers[3].id,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 1,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(4);
-            }
-        }
-        while (shuffledPlayers.length > 2) {
-            const player1 = shuffledPlayers[0];
-            const player2 = shuffledPlayers[1];
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: shuffledPlayers[0].id,
-                            player2Id: shuffledPlayers[1].id,
-                            player3Id: shuffledPlayers[2].id,
-                            player4Id: null,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 1,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    shuffledPlayers = shuffledPlayers.slice(3);
-                    validMatchFound = true;
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: shuffledPlayers[0].id,
-                        player2Id: shuffledPlayers[1].id,
-                        player3Id: shuffledPlayers[2].id,
-                        player4Id: null,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 1,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(3);
-            }
-        }
-        while (shuffledPlayers.length > 1) {
-            const player1 = shuffledPlayers[0];
-            const player2 = shuffledPlayers[1];
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: shuffledPlayers[0].id,
-                            player2Id: null,
-                            player3Id: shuffledPlayers[1].id,
-                            player4Id: null,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 1,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    shuffledPlayers = shuffledPlayers.slice(2);
-                    validMatchFound = true;
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: shuffledPlayers[0].id,
-                        player2Id: null,
-                        player3Id: shuffledPlayers[1].id,
-                        player4Id: null,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 1,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(2); // Remove used players
-            }
-        }
-        while (shuffledPlayers.length === 1) {
+        while (validTeam.length > 3) {
             yield prismaClient_1.default.match.create({
                 data: {
                     userId: parseInt(userId),
-                    player1Id: shuffledPlayers[0].id,
-                    player2Id: null,
-                    player3Id: null,
-                    player4Id: null,
+                    player1Id: validTeam[0],
+                    player2Id: validTeam[1],
+                    player3Id: validTeam[2],
+                    player4Id: validTeam[3],
                     run: newRun,
-                    season: season,
+                    season,
                     winnerTeam: 0,
                     gameModeId: 1,
                     createdAt: new Date(),
                     date: new Date(),
                 },
             });
-            shuffledPlayers = shuffledPlayers.slice(1);
+            validTeam = validTeam.slice(4);
         }
-        console.log("Matches created");
+        if (validTeam.length === 3) {
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: validTeam[1],
+                    player3Id: validTeam[2],
+                    player4Id: null,
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 1,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(3);
+        }
+        if (validTeam.length === 2) {
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: null,
+                    player3Id: validTeam[1],
+                    player4Id: null,
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 1,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(2);
+        }
+        if (validTeam.length === 1) {
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: null,
+                    player3Id: null,
+                    player4Id: null,
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 1,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(1);
+        }
+        //     const match = await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: shuffledPlayers[0].id,
+        //         player2Id: shuffledPlayers[1].id,
+        //         player3Id: shuffledPlayers[2].id,
+        //         player4Id: shuffledPlayers[3].id,
+        //         run: newRun,
+        //         season,
+        //         winnerTeam: 0,
+        //         gameModeId: 1,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        // console.log({
+        //   action: 'initial_setup',
+        //   newRun,
+        //   season,
+        //   shuffledPlayers: shuffledPlayers.map(p => ({ id: p.id, name: p.name }))
+        // });
+        // Create 4-player matches
+        // console.group('Creating 4-player matches');
+        // while (shuffledPlayers.length > 3) {
+        //   console.log({
+        //     action: 'processing_4_players',
+        //     remainingPlayers: shuffledPlayers.length,
+        //     players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
+        //   });
+        // let maxRetries = 10;
+        // let validMatchFound = false;
+        // while (maxRetries > 0 && !validMatchFound) {
+        //   const valid = filterLastRunPlayersPairs(shuffledPlayers[0].id, shuffledPlayers[1].id, lastRunPlayersPairs) &&
+        //                filterLastRunPlayersPairs(shuffledPlayers[2].id, shuffledPlayers[3].id, lastRunPlayersPairs);
+        //   console.log({
+        //     action: 'checking_pairs',
+        //     attempt: 11 - maxRetries,
+        //     valid,
+        //     pairs: [
+        //       [shuffledPlayers[0].id, shuffledPlayers[1].id],
+        //       [shuffledPlayers[2].id, shuffledPlayers[3].id]
+        //     ]
+        //   });
+        //   if (valid) {
+        //     const match = await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: shuffledPlayers[0].id,
+        //         player2Id: shuffledPlayers[1].id,
+        //         player3Id: shuffledPlayers[2].id,
+        //         player4Id: shuffledPlayers[3].id,
+        //         run: newRun,
+        //         season,
+        //         winnerTeam: 0,
+        //         gameModeId: 1,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        //     console.log({
+        //       action: 'created_4p_match',
+        //       matchId: match.id,
+        //       players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
+        //     });
+        //     shuffledPlayers = shuffledPlayers.slice(4);
+        //     validMatchFound = true;
+        //   } else {
+        //     shuffledPlayers = shufflePlayers(shuffledPlayers);
+        //     maxRetries--;
+        //   }
+        // }
+        // if (!validMatchFound) {
+        //   console.log({
+        //     action: 'fallback_4p_match',
+        //     reason: 'max_retries_reached',
+        //     players: shuffledPlayers.slice(0, 4).map(p => ({ id: p.id, name: p.name }))
+        //   });
+        //   // ... rest of the fallback creation code ...
+        // }
+        // console.groupEnd();
+        // Similar debug groups for 3-player and 2-player matches...
+        // console.log({
+        //   action: 'matches_creation_completed',
+        //   newRun,
+        //   season,
+        //   remainingPlayers: shuffledPlayers.length
+        // });
         res.status(200).json({ message: "Matches created" });
     }
     catch (error) {
         console.error(error);
+        // console.error({
+        //   action: 'error',
+        //   error: error instanceof Error ? error.message : 'Unknown error',
+        //   stack: error instanceof Error ? error.stack : undefined
+        // });
         res.status(500).json({ message: "Internal server error" });
     }
+    console.groupEnd();
 });
 exports.createMatchesMode1 = createMatchesMode1;
 const createMatchesMode2 = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -281,14 +378,17 @@ const createMatchesMode2 = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 winnerTeam: 0,
             },
         });
-        console.log("Matches with no winner deleted");
+        // console.log("Matches with no winner deleted");
         const players = yield prismaClient_1.default.player.findMany({
             where: {
                 userId: parseInt(userId),
                 status: "active",
             },
         });
-        console.log("Active players fetched", players.map((player) => player.name));
+        // console.log(
+        //   "Active players fetched",
+        //   players.map((player) => player.name)
+        // );
         if (players.length < 4) {
             res.status(400).json({ error: "Not enough active players" });
             return;
@@ -320,7 +420,7 @@ const createMatchesMode2 = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 lastRunPlayersPairs.add(pair2);
             });
         }
-        console.log("Last run players pairs", lastRunPlayersPairs);
+        // console.log("Last run players pairs", lastRunPlayersPairs);
         const lastWinnerTeam = (_a = lastRunMatch[0]) === null || _a === void 0 ? void 0 : _a.winnerTeam;
         const lastWinnerPlayer1 = lastWinnerTeam === 1
             ? (_b = lastRunMatch[0]) === null || _b === void 0 ? void 0 : _b.player1Id
@@ -336,65 +436,50 @@ const createMatchesMode2 = (req, res) => __awaiter(void 0, void 0, void 0, funct
         console.log("Is last winner player 1 active", isLastWinnerPlayer1Active);
         console.log("Last winner player 2", lastWinnerPlayer2);
         console.log("Is last winner player 2 active", isLastWinnerPlayer2Active);
-        let shuffledPlayers = shufflePlayers(players);
-        console.log("Shuffled players", shuffledPlayers);
+        // let shuffledPlayers = shufflePlayers(players);
+        // console.log("Shuffled players", shuffledPlayers);
         //Aquí tendría que exluir a los ganadores si fuera el otro modo
+        let validTeam = createValidTeams(players, lastRunPlayersPairs, 2);
         const newRun = lastRun + 1 || 1;
         const season = getSeason();
         if (isLastWinnerPlayer1Active && isLastWinnerPlayer2Active) {
             console.log("Case 1: Both last winner players are active");
-            shuffledPlayers = shuffledPlayers.filter((player) => player.id !== lastWinnerPlayer1 && player.id !== lastWinnerPlayer2);
-            console.log("Remaining players excluding the last winner players", shuffledPlayers);
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (lastWinnerPlayer1 &&
-                    lastWinnerPlayer2 &&
-                    filterLastRunPlayersPairs(lastWinnerPlayer1, shuffledPlayers[0].id, lastRunPlayersPairs) &&
-                    filterLastRunPlayersPairs(lastWinnerPlayer2, shuffledPlayers[1].id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: lastWinnerPlayer1,
-                            player2Id: shuffledPlayers[0].id,
-                            player3Id: lastWinnerPlayer2,
-                            player4Id: shuffledPlayers[1].id,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 2,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    validMatchFound = true;
-                    shuffledPlayers = shuffledPlayers.slice(2);
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs...");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: lastWinnerPlayer1,
-                        player2Id: shuffledPlayers[0].id,
-                        player3Id: lastWinnerPlayer2,
-                        player4Id: shuffledPlayers[1].id,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 2,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(2);
-            }
+            // console.log({
+            //   action: 'filtering_winners',
+            //   before: {
+            //     count: validTeam.length,
+            //     players: validTeam
+            //   },
+            //   winners: {
+            //     player1: lastWinnerPlayer1,
+            //     player2: lastWinnerPlayer2
+            //   }
+            // });
+            validTeam = validTeam.filter((player) => player !== lastWinnerPlayer1 && player !== lastWinnerPlayer2);
+            // console.log({
+            //   action: 'after_filtering',
+            //   count: validTeam.length,
+            //   players: validTeam,
+            //   removedPlayers: validTeam.filter(p => 
+            //     p === lastWinnerPlayer1 || p === lastWinnerPlayer2
+            //   )
+            // });
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: lastWinnerPlayer1,
+                    player2Id: validTeam[0],
+                    player3Id: lastWinnerPlayer2,
+                    player4Id: validTeam[1],
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 2,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(2);
         }
         if ((isLastWinnerPlayer1Active && !isLastWinnerPlayer2Active) ||
             (!isLastWinnerPlayer1Active && isLastWinnerPlayer2Active)) {
@@ -402,183 +487,344 @@ const createMatchesMode2 = (req, res) => __awaiter(void 0, void 0, void 0, funct
             const lastActiveWinnerPlayer = isLastWinnerPlayer1Active
                 ? lastWinnerPlayer1
                 : lastWinnerPlayer2;
-            shuffledPlayers = shuffledPlayers.filter((player) => player.id !== lastActiveWinnerPlayer);
-            console.log("Remaining players excluding the last winner player", shuffledPlayers);
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (lastActiveWinnerPlayer &&
-                    filterLastRunPlayersPairs(lastActiveWinnerPlayer, shuffledPlayers[0].id, lastRunPlayersPairs) &&
-                    filterLastRunPlayersPairs(shuffledPlayers[1].id, shuffledPlayers[2].id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: lastWinnerPlayer1,
-                            player2Id: shuffledPlayers[0].id,
-                            player3Id: shuffledPlayers[1].id,
-                            player4Id: shuffledPlayers[2].id,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 2,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    validMatchFound = true;
-                    shuffledPlayers = shuffledPlayers.slice(3);
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs...");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: lastWinnerPlayer1,
-                        player2Id: shuffledPlayers[0].id,
-                        player3Id: shuffledPlayers[1].id,
-                        player4Id: shuffledPlayers[2].id,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 2,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(3);
-            }
-        }
-        if (!isLastWinnerPlayer1Active && !isLastWinnerPlayer2Active) {
-            console.log("Case 3: Both last winner players are inactive");
-            while (shuffledPlayers.length > 3) {
-                let maxRetries = 10;
-                let validMatchFound = false;
-                while (maxRetries > 0 && !validMatchFound) {
-                    if (filterLastRunPlayersPairs(shuffledPlayers[0].id, shuffledPlayers[1].id, lastRunPlayersPairs) &&
-                        filterLastRunPlayersPairs(shuffledPlayers[2].id, shuffledPlayers[3].id, lastRunPlayersPairs)) {
-                        yield prismaClient_1.default.match.create({
-                            data: {
-                                userId: parseInt(userId),
-                                player1Id: shuffledPlayers[0].id,
-                                player2Id: shuffledPlayers[1].id,
-                                player3Id: shuffledPlayers[2].id,
-                                player4Id: shuffledPlayers[3].id,
-                                run: newRun,
-                                season: season,
-                                winnerTeam: 0,
-                                gameModeId: 2,
-                                createdAt: new Date(),
-                                date: new Date(),
-                            },
-                        });
-                        shuffledPlayers = shuffledPlayers.slice(4);
-                        validMatchFound = true;
-                    }
-                    else {
-                        shuffledPlayers = shufflePlayers(shuffledPlayers);
-                        maxRetries--;
-                    }
-                }
-                if (!validMatchFound) {
-                    console.log("Max retries reached, creating match anyway");
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: shuffledPlayers[0].id,
-                            player2Id: shuffledPlayers[1].id,
-                            player3Id: shuffledPlayers[2].id,
-                            player4Id: shuffledPlayers[3].id,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 2,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    shuffledPlayers = shuffledPlayers.slice(4);
-                }
-            }
-        }
-        while (shuffledPlayers.length > 1) {
-            const player1 = shuffledPlayers[0];
-            const player2 = shuffledPlayers[1];
-            let maxRetries = 10;
-            let validMatchFound = false;
-            while (maxRetries > 0 && !validMatchFound) {
-                if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
-                    yield prismaClient_1.default.match.create({
-                        data: {
-                            userId: parseInt(userId),
-                            player1Id: shuffledPlayers[0].id,
-                            player2Id: shuffledPlayers[1].id,
-                            player3Id: null,
-                            player4Id: null,
-                            run: newRun,
-                            season: season,
-                            winnerTeam: 0,
-                            gameModeId: 2,
-                            createdAt: new Date(),
-                            date: new Date(),
-                        },
-                    });
-                    shuffledPlayers = shuffledPlayers.slice(2);
-                    validMatchFound = true;
-                }
-                else {
-                    console.log("Conflict in pairs, reshuffling players pairs");
-                    shuffledPlayers = shufflePlayers(shuffledPlayers);
-                    maxRetries--;
-                }
-            }
-            if (!validMatchFound) {
-                console.log("Max retries reached, creating match anyway");
-                yield prismaClient_1.default.match.create({
-                    data: {
-                        userId: parseInt(userId),
-                        player1Id: shuffledPlayers[0].id,
-                        player2Id: shuffledPlayers[1].id,
-                        player3Id: null,
-                        player4Id: null,
-                        run: newRun,
-                        season: season,
-                        winnerTeam: 0,
-                        gameModeId: 2,
-                        createdAt: new Date(),
-                        date: new Date(),
-                    },
-                });
-                shuffledPlayers = shuffledPlayers.slice(2);
-            }
-        }
-        while (shuffledPlayers.length === 1) {
-            const player1 = shuffledPlayers[0] ? shuffledPlayers[0].id : null;
-            const player2 = null;
-            const player3 = null;
-            const player4 = null;
+            validTeam = validTeam.filter((player) => player !== lastActiveWinnerPlayer);
             yield prismaClient_1.default.match.create({
                 data: {
                     userId: parseInt(userId),
-                    player1Id: shuffledPlayers[0].id,
-                    player2Id: player2,
-                    player3Id: player3,
-                    player4Id: player4,
+                    player1Id: lastWinnerPlayer1,
+                    player2Id: validTeam[0],
+                    player3Id: validTeam[1],
+                    player4Id: validTeam[2],
                     run: newRun,
-                    season: season,
+                    season,
                     winnerTeam: 0,
                     gameModeId: 2,
                     createdAt: new Date(),
                     date: new Date(),
                 },
             });
-            shuffledPlayers = shuffledPlayers.slice(1);
+            validTeam = validTeam.slice(3);
         }
+        if ((!isLastWinnerPlayer1Active && !isLastWinnerPlayer2Active)) {
+            console.log("Case 3: Both last winner players are inactive");
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: validTeam[1],
+                    player3Id: validTeam[2],
+                    player4Id: validTeam[3],
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 2,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(4);
+        }
+        while (validTeam.length > 1) {
+            console.log("Remaining players", validTeam);
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: validTeam[1],
+                    player3Id: null,
+                    player4Id: null,
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 2,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+            validTeam = validTeam.slice(2);
+        }
+        if (validTeam.length === 1) {
+            yield prismaClient_1.default.match.create({
+                data: {
+                    userId: parseInt(userId),
+                    player1Id: validTeam[0],
+                    player2Id: null,
+                    player3Id: null,
+                    player4Id: null,
+                    run: newRun,
+                    season,
+                    winnerTeam: 0,
+                    gameModeId: 2,
+                    createdAt: new Date(),
+                    date: new Date(),
+                },
+            });
+        }
+        // console.log(
+        //   "Remaining players excluding the last winner players",
+        //   validTeam
+        // );
+        // let maxRetries = 10;
+        // let validMatchFound = false;
+        // while (maxRetries > 0 && !validMatchFound) {
+        //   if (
+        //     lastWinnerPlayer1 &&
+        //     lastWinnerPlayer2 &&
+        //     filterLastRunPlayersPairs(
+        //       lastWinnerPlayer1,
+        //       shuffledPlayers[0].id,
+        //       lastRunPlayersPairs
+        //     ) &&
+        //     filterLastRunPlayersPairs(
+        //       lastWinnerPlayer2,
+        //       shuffledPlayers[1].id,
+        //       lastRunPlayersPairs
+        //     )
+        //   ) {
+        //     await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: lastWinnerPlayer1,
+        //         player2Id: shuffledPlayers[0].id,
+        //         player3Id: lastWinnerPlayer2,
+        //         player4Id: shuffledPlayers[1].id,
+        //         run: newRun,
+        //         season: season,
+        //         winnerTeam: 0,
+        //         gameModeId: 2,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        //     validMatchFound = true;
+        //     shuffledPlayers = shuffledPlayers.slice(2);
+        //   } else {
+        //     console.log("Conflict in pairs, reshuffling players pairs...");
+        //     shuffledPlayers = shufflePlayers(shuffledPlayers);
+        //     maxRetries--;
+        //   }
+        // }
+        //   if (!validMatchFound) {
+        //     console.log("Max retries reached, creating match anyway");
+        //     await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: lastWinnerPlayer1,
+        //         player2Id: shuffledPlayers[0].id,
+        //         player3Id: lastWinnerPlayer2,
+        //         player4Id: shuffledPlayers[1].id,
+        //         run: newRun,
+        //         season: season,
+        //         winnerTeam: 0,
+        //         gameModeId: 2,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        //     shuffledPlayers = shuffledPlayers.slice(2);
+        //   }
+        // }
+        // if (
+        //   (isLastWinnerPlayer1Active && !isLastWinnerPlayer2Active) ||
+        //   (!isLastWinnerPlayer1Active && isLastWinnerPlayer2Active)
+        // ) {
+        //   console.log("Case 2: Only one of the last winner players is active");
+        //   const lastActiveWinnerPlayer = isLastWinnerPlayer1Active
+        //     ? lastWinnerPlayer1
+        //     : lastWinnerPlayer2;
+        //   shuffledPlayers = shuffledPlayers.filter(
+        //     (player) => player.id !== lastActiveWinnerPlayer
+        //   );
+        //   console.log(
+        //     "Remaining players excluding the last winner player",
+        //     shuffledPlayers
+        //   );
+        //   let maxRetries = 10;
+        //   let validMatchFound = false;
+        //   while (maxRetries > 0 && !validMatchFound) {
+        //     if (
+        //       lastActiveWinnerPlayer &&
+        //       filterLastRunPlayersPairs(
+        //         lastActiveWinnerPlayer,
+        //         shuffledPlayers[0].id,
+        //         lastRunPlayersPairs
+        //       ) &&
+        //       filterLastRunPlayersPairs(
+        //         shuffledPlayers[1].id,
+        //         shuffledPlayers[2].id,
+        //         lastRunPlayersPairs
+        //       )
+        //     ) {
+        //       await prisma.match.create({
+        //         data: {
+        //           userId: parseInt(userId),
+        //           player1Id: lastWinnerPlayer1,
+        //           player2Id: shuffledPlayers[0].id,
+        //           player3Id: shuffledPlayers[1].id,
+        //           player4Id: shuffledPlayers[2].id,
+        //           run: newRun,
+        //           season: season,
+        //           winnerTeam: 0,
+        //           gameModeId: 2,
+        //           createdAt: new Date(),
+        //           date: new Date(),
+        //         },
+        //       });
+        //       validMatchFound = true;
+        //       shuffledPlayers = shuffledPlayers.slice(3);
+        //     } else {
+        //       console.log("Conflict in pairs, reshuffling players pairs...");
+        //       shuffledPlayers = shufflePlayers(shuffledPlayers);
+        //       maxRetries--;
+        //     }
+        //   }
+        //   if (!validMatchFound) {
+        //     console.log("Max retries reached, creating match anyway");
+        //     await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: lastWinnerPlayer1,
+        //         player2Id: shuffledPlayers[0].id,
+        //         player3Id: shuffledPlayers[1].id,
+        //         player4Id: shuffledPlayers[2].id,
+        //         run: newRun,
+        //         season: season,
+        //         winnerTeam: 0,
+        //         gameModeId: 2,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        //     shuffledPlayers = shuffledPlayers.slice(3);
+        //   }
+        // }
+        // if (!isLastWinnerPlayer1Active && !isLastWinnerPlayer2Active) {
+        //   console.log("Case 3: Both last winner players are inactive");
+        //   while (shuffledPlayers.length > 3) {
+        //     let maxRetries = 10;
+        //     let validMatchFound = false;
+        //     while (maxRetries > 0 && !validMatchFound) {
+        //       if (filterLastRunPlayersPairs(
+        //         shuffledPlayers[0].id,
+        //         shuffledPlayers[1].id,
+        //         lastRunPlayersPairs
+        //       ) &&
+        //       filterLastRunPlayersPairs(
+        //         shuffledPlayers[2].id,
+        //         shuffledPlayers[3].id,
+        //         lastRunPlayersPairs
+        //       )) {
+        //         await prisma.match.create({
+        //           data: {
+        //             userId: parseInt(userId),
+        //             player1Id: shuffledPlayers[0].id,
+        //             player2Id: shuffledPlayers[1].id,
+        //             player3Id: shuffledPlayers[2].id,
+        //             player4Id: shuffledPlayers[3].id,
+        //             run: newRun,
+        //             season: season,
+        //             winnerTeam: 0,
+        //             gameModeId: 2,
+        //             createdAt: new Date(),
+        //             date: new Date(),
+        //           },
+        //         });
+        //         shuffledPlayers = shuffledPlayers.slice(4);
+        //         validMatchFound = true;
+        //       } else {
+        //         shuffledPlayers = shufflePlayers(shuffledPlayers);
+        //         maxRetries--;
+        //       }
+        //     }
+        //     if (!validMatchFound) {
+        //       console.log("Max retries reached, creating match anyway");
+        //       await prisma.match.create({
+        //         data: {
+        //           userId: parseInt(userId),
+        //           player1Id: shuffledPlayers[0].id,
+        //           player2Id: shuffledPlayers[1].id,
+        //           player3Id: shuffledPlayers[2].id,
+        //           player4Id: shuffledPlayers[3].id,
+        //           run: newRun,
+        //           season: season,
+        //           winnerTeam: 0,
+        //           gameModeId: 2,
+        //           createdAt: new Date(),
+        //           date: new Date(),
+        //         },
+        //       });
+        //       shuffledPlayers = shuffledPlayers.slice(4);
+        //     }
+        //   }
+        // }
+        // while (shuffledPlayers.length > 1) {
+        //   const player1 = shuffledPlayers[0];
+        //   const player2 = shuffledPlayers[1];
+        //   let maxRetries = 10;
+        //   let validMatchFound = false;
+        //   while (maxRetries > 0 && !validMatchFound) {
+        //     if (filterLastRunPlayersPairs(player1.id, player2.id, lastRunPlayersPairs)) {
+        //       await prisma.match.create({
+        //         data: {
+        //           userId: parseInt(userId),
+        //           player1Id: shuffledPlayers[0].id,
+        //           player2Id: shuffledPlayers[1].id,
+        //           player3Id: null,
+        //           player4Id: null,
+        //           run: newRun,
+        //           season: season,
+        //           winnerTeam: 0,
+        //           gameModeId: 2,
+        //           createdAt: new Date(),
+        //           date: new Date(),
+        //         },
+        //       });
+        //       shuffledPlayers = shuffledPlayers.slice(2);
+        //       validMatchFound = true;
+        //     } else {
+        //       console.log("Conflict in pairs, reshuffling players pairs");
+        //       shuffledPlayers = shufflePlayers(shuffledPlayers);
+        //       maxRetries--;
+        //     }
+        //   }
+        //   if (!validMatchFound) {
+        //     console.log("Max retries reached, creating match anyway");
+        //     await prisma.match.create({
+        //       data: {
+        //         userId: parseInt(userId),
+        //         player1Id: shuffledPlayers[0].id,
+        //         player2Id: shuffledPlayers[1].id,
+        //         player3Id: null,
+        //         player4Id: null,
+        //         run: newRun,
+        //         season: season,
+        //         winnerTeam: 0,
+        //         gameModeId: 2,
+        //         createdAt: new Date(),
+        //         date: new Date(),
+        //       },
+        //     });
+        //     shuffledPlayers = shuffledPlayers.slice(2);
+        //   }
+        // }
+        // while (shuffledPlayers.length === 1) {
+        //   await prisma.match.create({
+        //     data: {
+        //       userId: parseInt(userId),
+        //       player1Id: shuffledPlayers[0].id,
+        //       player2Id: null,
+        //       player3Id: null,
+        //       player4Id: null,
+        //       run: newRun,
+        //       season: season,
+        //       winnerTeam: 0,
+        //       gameModeId: 2,
+        //       createdAt: new Date(),
+        //       date: new Date(),
+        //     },
+        //   });
+        //   shuffledPlayers = shuffledPlayers.slice(1);
+        // }
         console.log("Matches created");
         res.status(200).json({ message: "Matches created" });
     }
@@ -638,11 +884,32 @@ const updateMatchTeamWinner = (req, res) => __awaiter(void 0, void 0, void 0, fu
         return;
     }
     try {
-        // Update and fetch match in one step to avoid redundant queries
-        const match = yield prismaClient_1.default.match.update({
+        // First fetch the match to validate players
+        const match = yield prismaClient_1.default.match.findUnique({
+            where: { id: matchId },
+            select: {
+                userId: true,
+                run: true,
+                gameModeId: true,
+                player1Id: true,
+                player2Id: true,
+                player3Id: true,
+                player4Id: true
+            },
+        });
+        if (!match) {
+            res.status(404).json({ error: "Cannot set winner: match requires 4 players" });
+            return;
+        }
+        // Validate all players are present
+        if (!match.player1Id || !match.player2Id || !match.player3Id || !match.player4Id) {
+            res.status(400).json({ error: "Cannot set winner: match requires 4 players" });
+            return;
+        }
+        // Update match with winner
+        yield prismaClient_1.default.match.update({
             where: { id: matchId },
             data: { winnerTeam },
-            select: { userId: true, run: true, gameModeId: true, player1Id: true, player2Id: true, player3Id: true, player4Id: true },
         });
         // If gameModeId is 2, find and update next match
         if (match.gameModeId === 2) {
