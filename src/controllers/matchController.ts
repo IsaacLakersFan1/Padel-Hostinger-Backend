@@ -96,8 +96,6 @@ const createValidTeams = (players: Player[], teams: Set<string>, gameModeId: num
 };
 
 
-
-
 const shufflePlayers = (players: Player[]) => {
 
   let newOrder = [...players];
@@ -1113,6 +1111,114 @@ const addTeammate = async (req: AuthRequest, res: Response): Promise<void> => {
   }
 };
 
+const getMatchById = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { matchId } = req.body;
+  try {
+    const match = await prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        player1: true,
+        player2: true,
+        player3: true,
+        player4: true,
+      }
+    });
+
+    if (!match) {
+      res.status(404).json({ error: "Match not found" });
+      return;
+    }
+
+    res.status(200).json({ message: "Match fetched successfully.", match });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+  
+};
+
+const updateMatch = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const { matchId, player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date } = req.body;
+    await prisma.match.update({
+      where: { id: matchId },
+      data: { player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date }
+    });
+    res.status(200).json({ message: "Match updated successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const createMatch = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { userId } = req.user;
+  try {
+    const { player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date } = req.body;
+    await prisma.match.create({
+      data: { player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date, userId: parseInt(userId) }
+    });
+    res.status(200).json({ message: "Match created successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const getMatchesByRun = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { userId } = req.user;
+  const { run } = req.body;
+  
+  try {
+    if (run) {
+      const matches = await prisma.match.findMany({
+        where: { run, userId: parseInt(userId) }
+      });
+      res.status(200).json({ message: "Matches fetched successfully.", matches });
+      return;
+    }
+
+    // Get last run's matches if no run specified
+    const lastRunMatch = await prisma.match.findFirst({
+      where: { userId: parseInt(userId), winnerTeam: { not: 0 } },
+      orderBy: { run: 'desc' }
+    });
+
+    if (!lastRunMatch) {
+      res.status(404).json({ message: "No matches found" });
+      return;
+    }
+
+    const matches = await prisma.match.findMany({
+      where: { 
+        run: lastRunMatch.run,
+        userId: parseInt(userId)
+      }
+    });
+    
+    res.status(200).json({ message: "Matches fetched successfully.", matches });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 // const generateValidMatches = async (players: any[], userId: number, lastRunPlayersPairs: Set<string>) => {
 //     let validMatches = [];
@@ -1473,4 +1579,4 @@ const addTeammate = async (req: AuthRequest, res: Response): Promise<void> => {
 
 
 
-export { createMatchesMode1, createMatchesMode2, getLastRunMatches, updateMatchTeamWinner, addTeammate };
+export { createMatchesMode1, createMatchesMode2, getLastRunMatches, updateMatchTeamWinner, addTeammate, getMatchById, updateMatch, createMatch, getMatchesByRun };
