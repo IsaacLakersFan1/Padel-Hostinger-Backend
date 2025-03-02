@@ -1147,10 +1147,10 @@ const updateMatch = async (req: AuthRequest, res: Response): Promise<void> => {
     return;
   }
   try {
-    const { matchId, player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date } = req.body;
+    const { matchId, player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId } = req.body;
     await prisma.match.update({
       where: { id: matchId },
-      data: { player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId, date }
+      data: { player1Id, player2Id, player3Id, player4Id,winnerTeam, run, season, gameModeId }
     });
     res.status(200).json({ message: "Match updated successfully." });
   } catch (error) {
@@ -1189,7 +1189,13 @@ const getMatchesByRun = async (req: AuthRequest, res: Response): Promise<void> =
   try {
     if (run) {
       const matches = await prisma.match.findMany({
-        where: { run, userId: parseInt(userId) }
+        where: { run, userId: parseInt(userId) },
+        include: {
+          player1: true,
+          player2: true,
+          player3: true,
+          player4: true
+        }
       });
       res.status(200).json({ message: "Matches fetched successfully.", matches });
       return;
@@ -1219,6 +1225,32 @@ const getMatchesByRun = async (req: AuthRequest, res: Response): Promise<void> =
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+const getAllRuns = async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { userId } = req.user;
+  try {
+    const runs = await prisma.match.findMany({
+      where: { userId: parseInt(userId) },
+      distinct: ["run"],
+      select: {
+        run: true
+      },
+      orderBy: {
+        run: "desc"
+      }
+    });
+    res.status(200).json({ message: "Runs fetched successfully.", runs });
+   } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+   }
+};
+
+
 
 // const generateValidMatches = async (players: any[], userId: number, lastRunPlayersPairs: Set<string>) => {
 //     let validMatches = [];
@@ -1579,4 +1611,4 @@ const getMatchesByRun = async (req: AuthRequest, res: Response): Promise<void> =
 
 
 
-export { createMatchesMode1, createMatchesMode2, getLastRunMatches, updateMatchTeamWinner, addTeammate, getMatchById, updateMatch, createMatch, getMatchesByRun };
+export { createMatchesMode1, createMatchesMode2, getLastRunMatches, updateMatchTeamWinner, addTeammate, getMatchById, updateMatch, createMatch, getMatchesByRun, getAllRuns };
