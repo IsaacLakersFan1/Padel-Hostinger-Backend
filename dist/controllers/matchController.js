@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addTeammate = exports.updateMatchTeamWinner = exports.getLastRunMatches = exports.createMatchesMode2 = exports.createMatchesMode1 = void 0;
+exports.getAllRuns = exports.getMatchesByRun = exports.createMatch = exports.updateMatch = exports.getMatchById = exports.addTeammate = exports.updateMatchTeamWinner = exports.getLastRunMatches = exports.createMatchesMode2 = exports.createMatchesMode1 = void 0;
 const prismaClient_1 = __importDefault(require("../utils/prismaClient"));
 const filterLastRunPlayersPairs = (player1, player2, lastRunPlayersPairs) => {
     const pair = [player1, player2].sort().join("-");
@@ -986,3 +986,138 @@ const addTeammate = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.addTeammate = addTeammate;
+const getMatchById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    const { matchId } = req.body;
+    try {
+        const match = yield prismaClient_1.default.match.findUnique({
+            where: { id: matchId },
+            include: {
+                player1: true,
+                player2: true,
+                player3: true,
+                player4: true,
+            }
+        });
+        if (!match) {
+            res.status(404).json({ error: "Match not found" });
+            return;
+        }
+        res.status(200).json({ message: "Match fetched successfully.", match });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+exports.getMatchById = getMatchById;
+const updateMatch = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    try {
+        const { matchId, player1Id, player2Id, player3Id, player4Id, winnerTeam, run, season, gameModeId } = req.body;
+        yield prismaClient_1.default.match.update({
+            where: { id: matchId },
+            data: { player1Id, player2Id, player3Id, player4Id, winnerTeam, run, season, gameModeId }
+        });
+        res.status(200).json({ message: "Match updated successfully." });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+exports.updateMatch = updateMatch;
+const createMatch = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    const { userId } = req.user;
+    try {
+        const { player1Id, player2Id, player3Id, player4Id, winnerTeam, run, season, gameModeId, date } = req.body;
+        yield prismaClient_1.default.match.create({
+            data: { player1Id, player2Id, player3Id, player4Id, winnerTeam, run, season, gameModeId, date, userId: parseInt(userId) }
+        });
+        res.status(200).json({ message: "Match created successfully." });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+exports.createMatch = createMatch;
+const getMatchesByRun = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    const { userId } = req.user;
+    const { run } = req.body;
+    try {
+        if (run) {
+            const matches = yield prismaClient_1.default.match.findMany({
+                where: { run, userId: parseInt(userId) },
+                include: {
+                    player1: true,
+                    player2: true,
+                    player3: true,
+                    player4: true
+                }
+            });
+            res.status(200).json({ message: "Matches fetched successfully.", matches });
+            return;
+        }
+        // Get last run's matches if no run specified
+        const lastRunMatch = yield prismaClient_1.default.match.findFirst({
+            where: { userId: parseInt(userId), winnerTeam: { not: 0 } },
+            orderBy: { run: 'desc' }
+        });
+        if (!lastRunMatch) {
+            res.status(404).json({ message: "No matches found" });
+            return;
+        }
+        const matches = yield prismaClient_1.default.match.findMany({
+            where: {
+                run: lastRunMatch.run,
+                userId: parseInt(userId)
+            }
+        });
+        res.status(200).json({ message: "Matches fetched successfully.", matches });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+exports.getMatchesByRun = getMatchesByRun;
+const getAllRuns = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    const { userId } = req.user;
+    try {
+        const runs = yield prismaClient_1.default.match.findMany({
+            where: { userId: parseInt(userId) },
+            distinct: ["run"],
+            select: {
+                run: true
+            },
+            orderBy: {
+                run: "desc"
+            }
+        });
+        res.status(200).json({ message: "Runs fetched successfully.", runs });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+exports.getAllRuns = getAllRuns;

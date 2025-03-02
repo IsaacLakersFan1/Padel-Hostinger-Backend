@@ -9,4 +9,9 @@ router.post('/create-matches-mode-2', authMiddleware_1.authenticateJWT, matchCon
 router.post('/update-match-team-winner', authMiddleware_1.authenticateJWT, matchController_1.updateMatchTeamWinner);
 router.post('/add-teammate', authMiddleware_1.authenticateJWT, matchController_1.addTeammate);
 router.get('/last-run-matches', authMiddleware_1.authenticateJWT, matchController_1.getLastRunMatches);
+router.post('/get-match-by-id', authMiddleware_1.authenticateJWT, matchController_1.getMatchById);
+router.post('/update-match', authMiddleware_1.authenticateJWT, matchController_1.updateMatch);
+router.post('/create-match', authMiddleware_1.authenticateJWT, matchController_1.createMatch);
+router.post('/get-matches-by-run', authMiddleware_1.authenticateJWT, matchController_1.getMatchesByRun);
+router.get('/get-all-runs', authMiddleware_1.authenticateJWT, matchController_1.getAllRuns);
 exports.default = router;
